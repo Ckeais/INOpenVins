@@ -24,6 +24,7 @@
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
+using namespace Eigen;
 
 void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timestamp) {
 
@@ -364,6 +365,12 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // Allocate noise Jacobian
   Eigen::Matrix<double, 15, 12> G = Eigen::Matrix<double, 15, 12>::Zero();
+  Eigen::Matrix<double, 5, 5> X_prev = Eigen::Matrix<double, 5, 5>::Zero();
+  Eigen::Matrix<double, 5, 5> X = Eigen::Matrix<double, 5, 5>::Zero();
+  MatrixXd A = Eigen::Matrix<double, 9, 9>::Zero();
+  MatrixXd PHI;
+  Eigen::Matrix<double, 9, 9> P = Eigen::Matrix<double, 9, 9>::Zero();
+  Eigen::Matrix<double, 9, 9> P_prev = Eigen::Matrix<double, 9, 9>::Zero();
 
   // Now compute Jacobian of new state wrt old state and noise
   if (state->_options.do_fej) {
@@ -419,7 +426,47 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
     G.block(p_id, 3, 3, 3) = -0.5 * R_Gtoi.transpose() * dt * dt;
     G.block(bg_id, 6, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
     G.block(ba_id, 9, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+
+    // X_prev.block(th_id, 0, 3, 3) = quat_2_Rot(state->_imu->q());
+    // X_prev.block(v_id, 3, 3, 3) = state->_imu->v();
+    // X_prev.block(p_id, 3, 3, 3) = state->_imu->p();
+    // X_prev(3,3) = 1;
+    // X_prev(4,4) = 1;
+
+    // Eigen::Matrix<double, 3, 3> w_hat_mat {     
+    //     {0, -w_hat(2), w_hat(1)},
+    //     {w_hat(2), 0, -w_hat(0)},
+    //     {-w_hat(1), w_hat(0), 0}    
+    // };
+
+    // Eigen::Matrix<double, 3, 3> a_hat_mat {     
+    //     {0, -a_hat(2), a_hat(1)},
+    //     {a_hat(2), 0, -a_hat(0)},
+    //     {-a_hat(1), a_hat(0), 0}    
+    // };
+
+    // A.block(0, 0, 3, 3) = -w_hat_mat;
+    // A.block(3, 0, 3, 3) = -a_hat_mat;
+    // A.block(3, 3, 3, 3) = -w_hat_mat;
+    // A.block(6, 6, 3, 3) = -w_hat_mat;
+    // A.block(6, 3, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+
+    // PHI = (A*dt).Eigen::hat();
+ 
+
+
+
+
+
+
+
   }
+
+  // X.block(0, 0, 3, 3) = quat_2_Rot(state->_imu->q())*w_hat_mat;
+  // X.block(0, 3, 3, 3) = quat_2_Rot(state->_imu->q())*a_hat_mat + _gravity;
+  // X.block(0, 6, 3, 3) = state->_imu->v();
+
+
 
   // Construct our discrete noise covariance matrix
   // Note that we need to convert our continuous time noises to discrete
@@ -434,6 +481,42 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   Qd = G * Qc * G.transpose();
   Qd = 0.5 * (Qd + Qd.transpose());
 
+  Eigen::Matrix<double, 3, 3> w_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
+  Eigen::Matrix<double, 3, 3> a_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
+
+  w_hat_mat(0, 1) = -w_hat(2);
+  w_hat_mat(0, 2) = w_hat(1);
+  w_hat_mat(1, 0) = w_hat(2);
+  w_hat_mat(1, 2) = -w_hat(0);
+  w_hat_mat(2, 0) = -w_hat(1);
+  w_hat_mat(2, 1) = w_hat(0);
+
+  a_hat_mat(0, 1) = -a_hat(2);
+  a_hat_mat(0, 2) = a_hat(1);
+  a_hat_mat(1, 0) = a_hat(2);
+  a_hat_mat(1, 2) = -a_hat(0);
+  a_hat_mat(2, 0) = -a_hat(1);
+  a_hat_mat(2, 1) = a_hat(0);
+
+
+
+
+  A.block(0, 0, 3, 3) = -w_hat_mat;
+  A.block(3, 0, 3, 3) = -a_hat_mat;
+  A.block(3, 3, 3, 3) = -w_hat_mat;
+  A.block(6, 6, 3, 3) = -w_hat_mat;
+  A.block(6, 3, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+
+
+  Eigen::Matrix<double, 9, 9> eye9 = Eigen::Matrix<double, 9, 9>::Identity();
+
+  PHI = A*dt + eye9;
+
+  // PHI = (A).exp();
+
+  F.block(0, 0, 9, 9) = PHI;
+  std::cout << "GO TEAM 12!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; 
+
   // Now replace imu estimate and fej with propagated values
   Eigen::Matrix<double, 16, 1> imu_x = state->_imu->value();
   imu_x.block(0, 0, 4, 1) = new_q;
@@ -442,6 +525,119 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   state->_imu->set_value(imu_x);
   state->_imu->set_fej(imu_x);
 }
+
+// void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
+//                                           Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 15, 15> &Qd) {
+
+//   // Set them to zero
+//   F.setZero();
+//   Qd.setZero();
+
+//   // Time elapsed over interval
+//   double dt = data_plus.timestamp - data_minus.timestamp;
+//   // assert(data_plus.timestamp>data_minus.timestamp);
+
+//   // Corrected imu measurements
+//   Eigen::Matrix<double, 3, 1> w_hat = data_minus.wm - state->_imu->bias_g();
+//   Eigen::Matrix<double, 3, 1> a_hat = data_minus.am - state->_imu->bias_a();
+//   Eigen::Matrix<double, 3, 1> w_hat2 = data_plus.wm - state->_imu->bias_g();
+//   Eigen::Matrix<double, 3, 1> a_hat2 = data_plus.am - state->_imu->bias_a();
+
+//   // Compute the new state mean value
+//   Eigen::Vector4d new_q;
+//   Eigen::Vector3d new_v, new_p;
+//   if (state->_options.use_rk4_integration)
+//     predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+//   else
+//     predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+
+//   // Get the locations of each entry of the imu state
+//   int th_id = state->_imu->q()->id() - state->_imu->id();
+//   int p_id = state->_imu->p()->id() - state->_imu->id();
+//   int v_id = state->_imu->v()->id() - state->_imu->id();
+//   int bg_id = state->_imu->bg()->id() - state->_imu->id();
+//   int ba_id = state->_imu->ba()->id() - state->_imu->id();
+
+//   // Allocate noise Jacobian
+//   Eigen::Matrix<double, 15, 12> G = Eigen::Matrix<double, 15, 12>::Zero();
+
+//   // Now compute Jacobian of new state wrt old state and noise
+//   if (state->_options.do_fej) {
+
+//     // This is the change in the orientation from the end of the last prop to the current prop
+//     // This is needed since we need to include the "k-th" updated orientation information
+//     Eigen::Matrix<double, 3, 3> Rfej = state->_imu->Rot_fej();
+//     Eigen::Matrix<double, 3, 3> dR = quat_2_Rot(new_q) * Rfej.transpose();
+
+//     Eigen::Matrix<double, 3, 1> v_fej = state->_imu->vel_fej();
+//     Eigen::Matrix<double, 3, 1> p_fej = state->_imu->pos_fej();
+
+//     F.block(th_id, th_id, 3, 3) = dR;
+//     F.block(th_id, bg_id, 3, 3).noalias() = -dR * Jr_so3(-w_hat * dt) * dt;
+//     // F.block(th_id, bg_id, 3, 3).noalias() = -dR * Jr_so3(-log_so3(dR)) * dt;
+//     F.block(bg_id, bg_id, 3, 3).setIdentity();
+//     F.block(v_id, th_id, 3, 3).noalias() = -skew_x(new_v - v_fej + _gravity * dt) * Rfej.transpose();
+//     // F.block(v_id, th_id, 3, 3).noalias() = -Rfej.transpose() * skew_x(Rfej*(new_v-v_fej+_gravity*dt));
+//     F.block(v_id, v_id, 3, 3).setIdentity();
+//     F.block(v_id, ba_id, 3, 3) = -Rfej.transpose() * dt;
+//     F.block(ba_id, ba_id, 3, 3).setIdentity();
+//     F.block(p_id, th_id, 3, 3).noalias() = -skew_x(new_p - p_fej - v_fej * dt + 0.5 * _gravity * dt * dt) * Rfej.transpose();
+//     // F.block(p_id, th_id, 3, 3).noalias() = -0.5 * Rfej.transpose() * skew_x(2*Rfej*(new_p-p_fej-v_fej*dt+0.5*_gravity*dt*dt));
+//     F.block(p_id, v_id, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity() * dt;
+//     F.block(p_id, ba_id, 3, 3) = -0.5 * Rfej.transpose() * dt * dt;
+//     F.block(p_id, p_id, 3, 3).setIdentity();
+
+//     G.block(th_id, 0, 3, 3) = -dR * Jr_so3(-w_hat * dt) * dt;
+//     // G.block(th_id, 0, 3, 3) = -dR * Jr_so3(-log_so3(dR)) * dt;
+//     G.block(v_id, 3, 3, 3) = -Rfej.transpose() * dt;
+//     G.block(p_id, 3, 3, 3) = -0.5 * Rfej.transpose() * dt * dt;
+//     G.block(bg_id, 6, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+//     G.block(ba_id, 9, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+
+//   } else {
+
+//     Eigen::Matrix<double, 3, 3> R_Gtoi = state->_imu->Rot();
+
+//     F.block(th_id, th_id, 3, 3) = exp_so3(-w_hat * dt);
+//     F.block(th_id, bg_id, 3, 3).noalias() = -exp_so3(-w_hat * dt) * Jr_so3(-w_hat * dt) * dt;
+//     F.block(bg_id, bg_id, 3, 3).setIdentity();
+//     F.block(v_id, th_id, 3, 3).noalias() = -R_Gtoi.transpose() * skew_x(a_hat * dt);
+//     F.block(v_id, v_id, 3, 3).setIdentity();
+//     F.block(v_id, ba_id, 3, 3) = -R_Gtoi.transpose() * dt;
+//     F.block(ba_id, ba_id, 3, 3).setIdentity();
+//     F.block(p_id, th_id, 3, 3).noalias() = -0.5 * R_Gtoi.transpose() * skew_x(a_hat * dt * dt);
+//     F.block(p_id, v_id, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity() * dt;
+//     F.block(p_id, ba_id, 3, 3) = -0.5 * R_Gtoi.transpose() * dt * dt;
+//     F.block(p_id, p_id, 3, 3).setIdentity();
+
+//     G.block(th_id, 0, 3, 3) = -exp_so3(-w_hat * dt) * Jr_so3(-w_hat * dt) * dt;
+//     G.block(v_id, 3, 3, 3) = -R_Gtoi.transpose() * dt;
+//     G.block(p_id, 3, 3, 3) = -0.5 * R_Gtoi.transpose() * dt * dt;
+//     G.block(bg_id, 6, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+//     G.block(ba_id, 9, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+//   }
+
+//   // Construct our discrete noise covariance matrix
+//   // Note that we need to convert our continuous time noises to discrete
+//   // Equations (129) amd (130) of Trawny tech report
+//   Eigen::Matrix<double, 12, 12> Qc = Eigen::Matrix<double, 12, 12>::Zero();
+//   Qc.block(0, 0, 3, 3) = _noises.sigma_w_2 / dt * Eigen::Matrix<double, 3, 3>::Identity();
+//   Qc.block(3, 3, 3, 3) = _noises.sigma_a_2 / dt * Eigen::Matrix<double, 3, 3>::Identity();
+//   Qc.block(6, 6, 3, 3) = _noises.sigma_wb_2 * dt * Eigen::Matrix<double, 3, 3>::Identity();
+//   Qc.block(9, 9, 3, 3) = _noises.sigma_ab_2 * dt * Eigen::Matrix<double, 3, 3>::Identity();
+
+//   // Compute the noise injected into the state over the interval
+//   Qd = G * Qc * G.transpose();
+//   Qd = 0.5 * (Qd + Qd.transpose());
+
+//   // Now replace imu estimate and fej with propagated values
+//   Eigen::Matrix<double, 16, 1> imu_x = state->_imu->value();
+//   imu_x.block(0, 0, 4, 1) = new_q;
+//   imu_x.block(4, 0, 3, 1) = new_p;
+//   imu_x.block(7, 0, 3, 1) = new_v;
+//   state->_imu->set_value(imu_x);
+//   state->_imu->set_fej(imu_x);
+// }
 
 void Propagator::predict_mean_discrete(std::shared_ptr<State> state, double dt, const Eigen::Vector3d &w_hat1,
                                        const Eigen::Vector3d &a_hat1, const Eigen::Vector3d &w_hat2, const Eigen::Vector3d &a_hat2,
