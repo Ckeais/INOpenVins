@@ -21,10 +21,14 @@
 
 #include "Propagator.h"
 
+
+
+
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 using namespace Eigen;
+
 
 void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timestamp) {
 
@@ -79,9 +83,11 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
     for (size_t i = 0; i < prop_data.size() - 1; i++) {
 
       // Get the next state Jacobian and noise Jacobian for this IMU reading
+      Eigen::Matrix<double, 16, 16> PHI = Eigen::Matrix<double, 16, 16>::Zero();
       Eigen::Matrix<double, 15, 15> F = Eigen::Matrix<double, 15, 15>::Zero();
-      Eigen::Matrix<double, 15, 15> Qdi = Eigen::Matrix<double, 15, 15>::Zero();
-      predict_and_compute(state, prop_data.at(i), prop_data.at(i + 1), F, Qdi);
+      Eigen::Matrix<double, 16, 16> Qdi = Eigen::Matrix<double, 16, 16>::Zero();
+      Eigen::Matrix<double, 15, 1> mu = Eigen::Matrix<double, 15, 1>::Zero();
+      predict_and_compute(state, prop_data.at(i), prop_data.at(i + 1), F, PHI, Qdi, mu);
 
       // Next we should propagate our IMU covariance
       // Pii' = F*Pii*F.transpose() + G*Q*G.transpose()
@@ -90,9 +96,79 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       // NOTE: Phi_summed = Phi_i*Phi_summed
       // NOTE: Q_summed = Phi_i*Q_summed*Phi_i^T + G*Q_i*G^T
       Phi_summed = F * Phi_summed;
-      Qd_summed = F * Qd_summed * F.transpose() + Qdi;
+      Qd_summed = PHI * Qd_summed * PHI.transpose() + Qdi;
       Qd_summed = 0.5 * (Qd_summed + Qd_summed.transpose());
       dt_summed += prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp;
+
+
+
+
+      // unscented transform from se4(3) to original state
+      int n = 15;
+      int k = 2;
+
+      Eigen::LLT<MatrixXd> lltOfQd_summed(Qd_summed);
+      Eigen::MatrixXd L = lltOfQd_summed.matrixL();
+      Eigen::MatrixXd L_prime = sqrt(n + k)*L;
+
+      Eigen::Matrix<double, 15, 1> sigma_points [31];
+      double weights [31];
+
+      sigma_points[0] = mu;
+      weights[0] = k/(n + k);
+
+      int j = 1;
+      while (j < 16) {
+        sigma_points[j] = mu + L_prime.col(j-1);
+        weights[j] = 1/(2*(n + k));
+        j++;
+      }
+
+      j = 16;
+      while (j < 31) {
+        sigma_points[j] = mu + L_prime.col(j-16);
+        weights[j] = 1/(2*(n + k));
+        j++;
+      }
+
+
+      Eigen::Matrix<double, 16, 1> transformed_points [31];
+
+      for (int i = 0; i < 31; i++) {
+        Eigen::Matrix<double, 7, 7> mu_hat = Eigen::Matrix<double, 7, 7>::Zero();
+        mu_hat(0, 1) = -sigma_points[i](2);
+        mu_hat(0, 2) = sigma_points[i](1);
+        mu_hat(1, 0) = sigma_points[i](2);
+        mu_hat(1, 2) = -sigma_points[i](0);
+        mu_hat(2, 0) = -sigma_points[i](1);
+        mu_hat(2, 1) = sigma_points[i](0);
+        mu_hat.block(3, 0, 3, 1) = sigma_points[i].segment(3, 3);
+        mu_hat.block(6, 0, 3, 1) = sigma_points[i].segment(6, 3);
+        mu_hat.block(9, 0, 3, 1) = sigma_points[i].segment(9, 3);
+        mu_hat.block(12, 0, 3, 1) = sigma_points[i].segment(12, 3);
+        Eigen::Matrix<double, 7, 7> SE3_point = mu_hat.exp();
+        transformed_points[i].segment(0, 4) = rot_2_quat(SE3_point.block(0, 0, 3, 3));
+        transformed_points[i].segment(4, 3) << SE3_point(0, 1), SE3_point(1, 1), SE3_point(2, 1);
+        transformed_points[i].segment(7, 3) << SE3_point(0, 2), SE3_point(1, 2), SE3_point(2, 2);
+        transformed_points[i].segment(10, 3) << SE3_point(0, 3), SE3_point(1, 3), SE3_point(2, 3);
+        transformed_points[i].segment(13, 3) << SE3_point(0, 4), SE3_point(1, 4), SE3_point(2, 4);
+
+      }
+
+      Eigen::Matrix<double, 16, 1> mu_prime = Eigen::Matrix<double, 16, 1>::Zero();
+      Eigen::Matrix<double, 16, 16> Qd_summed_prime = Eigen::Matrix<double, 16, 16>::Zero();
+
+      for (int i = 0; i < 33; i++) {
+        mu_prime = mu_prime + weights[i]*transformed_points[i];
+      }
+
+      for (int i = 0; i < 33; i++) {
+        Qd_summed_prime = Qd_summed_prime + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
+      }
+
+      Qd_summed = Qd_summed_prime;
+
+
     }
   }
 
@@ -332,11 +408,13 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
 }
 
 void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
-                                     Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 15, 15> &Qd) {
+                                     Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 16, 16> &PHI, Eigen::Matrix<double, 16, 16> &Qd, 
+                                     Eigen::Matrix<double, 15, 1> &new_mu) {
 
   // Set them to zero
   F.setZero();
   Qd.setZero();
+
 
   // Time elapsed over interval
   double dt = data_plus.timestamp - data_minus.timestamp;
@@ -351,10 +429,10 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   // Compute the new state mean value
   Eigen::Vector4d new_q;
   Eigen::Vector3d new_v, new_p;
-  if (state->_options.use_rk4_integration)
-    predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
-  else
-    predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+  // if (state->_options.use_rk4_integration)
+  //   predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+  // else
+  //   predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
 
   // Get the locations of each entry of the imu state
   int th_id = state->_imu->q()->id() - state->_imu->id();
@@ -365,12 +443,12 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // Allocate noise Jacobian
   Eigen::Matrix<double, 15, 12> G = Eigen::Matrix<double, 15, 12>::Zero();
-  Eigen::Matrix<double, 5, 5> X_prev = Eigen::Matrix<double, 5, 5>::Zero();
-  Eigen::Matrix<double, 5, 5> X = Eigen::Matrix<double, 5, 5>::Zero();
-  MatrixXd A = Eigen::Matrix<double, 9, 9>::Zero();
-  MatrixXd PHI;
-  Eigen::Matrix<double, 9, 9> P = Eigen::Matrix<double, 9, 9>::Zero();
-  Eigen::Matrix<double, 9, 9> P_prev = Eigen::Matrix<double, 9, 9>::Zero();
+  // Eigen::Matrix<double, 5, 5> X_prev = Eigen::Matrix<double, 5, 5>::Zero();
+  // Eigen::Matrix<double, 5, 5> X = Eigen::Matrix<double, 5, 5>::Zero();
+  // MatrixXd A = Eigen::Matrix<double, 9, 9>::Zero();
+  // MatrixXd PHI;
+  // Eigen::Matrix<double, 9, 9> P = Eigen::Matrix<double, 9, 9>::Zero();
+  // Eigen::Matrix<double, 9, 9> P_prev = Eigen::Matrix<double, 9, 9>::Zero();
 
   // Now compute Jacobian of new state wrt old state and noise
   if (state->_options.do_fej) {
@@ -452,11 +530,6 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
     // A.block(6, 3, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
 
     // PHI = (A*dt).Eigen::hat();
- 
-
-
-
-
 
 
 
@@ -481,8 +554,137 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   Qd = G * Qc * G.transpose();
   Qd = 0.5 * (Qd + Qd.transpose());
 
+  // double qr = state->_imu->q()[0];
+  // double qx = state->_imu->q()[1];
+  // double qy = state->_imu->q()[2];
+  // double qz = state->_imu->q()[3];
+
+  // double yaw = arctan((2*(qr*qz + qz*qy))/(1 - 2*(qx*qx + qz*qz)));
+  // double pitch = arcsin(2*(qr*qy - qx*qz);
+  // double roll = arctan((2*(qr*qx + qy*qz))/(1 - 2*(qx*qx + qy*qy)));
+
+  // Eigen::Matrix<double, 6, 7> quat2EulJ = Eigen::Matrix<double, 6, 7>::Zero();
+
+  // quat2EulJ.block(0, 0, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+
+  // Eigen::Matrix<double, 3, 4> quat2EulubJ = Eigen::Matrix<double, 3, 4>::Zero();
+
+  // quat2EulubJ(0, 0) = (2*qz)/((1 - 2*(qz*qz + qx*qx))*((4*(qz*qr + qy*qz)*(qz*qr + qy*qz))/(1 - 2*(qz*qz + qx*qx)*(qz*qz + qx*qx))) + 1)
+  // quat2EulubJ(0, 1) = 
+  // quat2EulubJ(0, 2) = 
+  // quat2EulubJ(0, 3) = 
+
+  // quat2EulubJ(1, 0) = 
+  // quat2EulubJ(1, 1) = 
+  // quat2EulubJ(1, 2) = 
+  // quat2EulubJ(1, 3) = 
+
+  // quat2EulubJ(2, 0) = 
+  // quat2EulubJ(2, 1) = 
+  // quat2EulubJ(2, 2) = 
+  // quat2EulubJ(2, 3) = 
+
+
+  // quat2EulJ.block(3, 3, 3, 4) = quat2EulubJ;
+
+  // unscented transform from original state to SE4(3)
+
+  int n = 16;
+  int k = 2;
+
+  Eigen::LLT<MatrixXd> lltOfQd(Qd);
+  Eigen::MatrixXd L = lltOfQd.matrixL();
+  Eigen::MatrixXd L_prime = sqrt(n + k)*L;
+
+  Eigen::Matrix<double, 16, 1> sigma_points [33];
+  double weights [33];
+
+  // VectorXd vec_joined(state->_imu->q().size() + state->_imu->q().size());
+  // vec_joined << vec1, vec2;
+
+  Eigen::Matrix<double, 16, 1> mu;
+  mu << state->_imu->q(), state->_imu->p(), state->_imu->v(), state->_imu->bg(), state->_imu->ba();
+  // should these be new or not? ^^
+  sigma_points[0] = mu;
+  weights[0] = k/(n + k);
+
+  int i = 1;
+  while (i < 17) {
+    sigma_points[i] = mu + L_prime.col(i-1);
+    weights[i] = 1/(2*(n + k));
+    i++;
+  }
+
+  i = 17;
+  while (i < 33) {
+    sigma_points[i] = mu + L_prime.col(i-17);
+    weights[i] = 1/(2*(n + k));
+    i++;
+  }
+
+  
+  Eigen::Matrix<double, 15, 1> transformed_points [33];
+
+  for (int i = 0; i < 33; i++) {
+    Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
+    SE3_point.block(0, 0, 3, 3) = quat_2_Rot(sigma_points[i].segment(0, 4));
+    SE3_point.row(1) << sigma_points[i].segment(4, 3), 1, 0, 0, 0;
+    SE3_point.row(2) << sigma_points[i].segment(7, 3), 0, 1, 0, 0;
+    SE3_point.row(3) << sigma_points[i].segment(10, 3), 0, 0, 1, 0;
+    SE3_point.row(4) << sigma_points[i].segment(13, 3), 0, 0, 0, 1;
+    Eigen::Matrix<double, 7, 7> se3_point = SE3_point.log();
+    transformed_points[i](0) = se3_point(2, 1);
+    transformed_points[i](1) = se3_point(0, 2);
+    transformed_points[i](2) = se3_point(1, 0);
+    transformed_points[i].segment(3, 3) = se3_point.col(3).segment(0, 3);
+    transformed_points[i].segment(6, 3) = se3_point.col(4).segment(0, 3);
+    transformed_points[i].segment(9, 3) = se3_point.col(5).segment(0, 3);
+    transformed_points[i].segment(12, 3) = se3_point.col(6).segment(0, 3);
+
+
+  }
+
+  Eigen::Matrix<double, 15, 1> mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
+  Eigen::Matrix<double, 15, 15> Qd_prime = Eigen::Matrix<double, 15, 15>::Zero();
+
+  for (int i = 0; i < 33; i++) {
+    mu_prime = mu_prime + weights[i]*transformed_points[i];
+  }
+
+  for (int i = 0; i < 33; i++) {
+    Qd_prime = Qd_prime + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
+  }
+
+
+
+
+  //inEKF state transition calculation
   Eigen::Matrix<double, 3, 3> w_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
+  Eigen::Matrix<double, 7, 7> se3 = Eigen::Matrix<double, 7, 7>::Zero();
+  w_hat_mat(0, 1) = -mu_prime(2);
+  w_hat_mat(0, 2) = mu_prime(1);
+  w_hat_mat(1, 0) = mu_prime(2);
+  w_hat_mat(1, 2) = -mu_prime(0);
+  w_hat_mat(2, 0) = -mu_prime(1);
+  w_hat_mat(2, 1) = mu_prime(0);
+  se3_mu_prime.block(0, 0, 3, 3) = w_hat_mat;
+  se3_mu_prime.row(1) << mu_prime.segment(3, 3), 0, 0, 0, 0;
+  se3_mu_prime.row(2) << mu_prime.segment(6, 3), 0, 0, 0, 0;
+  se3_mu_prime.row(3) << mu_prime.segment(9, 3), 0, 0, 0, 0;
+  se3_mu_prime.row(4) << mu_prime.segment(12, 3), 0, 0, 0, 0;
+
+  Eigen::Matrix<double, 7, 7> SE3_mu_prime = se3_mu_prime.exp();
+
+  Eigen::MatrixXd A = Eigen::Matrix<double, 16, 16>::Zero();
+  Eigen::MatrixXd PHI = Eigen::Matrix<double, 16, 16>::Zero();;
+  w_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
   Eigen::Matrix<double, 3, 3> a_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
+
+  if (state->_options.imu_avg) {
+    w_hat = .5 * (w_hat + w_hat2);
+    a_hat = .5 * (a_hat + a_hat2);
+  }
+  
 
   w_hat_mat(0, 1) = -w_hat(2);
   w_hat_mat(0, 2) = w_hat(1);
@@ -507,14 +709,41 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   A.block(6, 6, 3, 3) = -w_hat_mat;
   A.block(6, 3, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
 
+  Eigen::Matrix<double, 16, 16> eye16 = Eigen::Matrix<double, 16, 16>::Identity();
 
-  Eigen::Matrix<double, 9, 9> eye9 = Eigen::Matrix<double, 9, 9>::Identity();
+  PHI = A*dt + eye16;
 
-  PHI = A*dt + eye9;
+  new_mu = PHI*SE3_mu_prime; // + wk?
 
-  // PHI = (A).exp();
+  new_q = rot_2_quat(new_mu.block(0, 0, 3, 3));
+  new_p = new_mu.block(0, 3, 3, 1);
+  new_v = new_mu.block(0, 6, 3, 1);
 
-  F.block(0, 0, 9, 9) = PHI;
+  new_mu = mu_prime;
+  Qd = Qd_prime;
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  // int th_id = state->_imu->q()->id() - state->_imu->id();
+  // int p_id = state->_imu->p()->id() - state->_imu->id();
+  // int v_id = state->_imu->v()->id() - state->_imu->id();
+  // int bg_id = state->_imu->bg()->id() - state->_imu->id();
+  // int ba_id = state->_imu->ba()->id() - state->_imu->id();
+
+
   std::cout << "GO TEAM 12!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; 
 
   // Now replace imu estimate and fej with propagated values

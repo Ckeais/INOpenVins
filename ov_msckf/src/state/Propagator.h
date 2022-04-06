@@ -206,7 +206,8 @@ protected:
    * @param Qd Discrete-time noise covariance over the interval
    */
   void predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
-                           Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 15, 15> &Qd);
+                            Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 16, 16> &PHI, Eigen::Matrix<double, 16, 16> &Qd, 
+                            Eigen::Matrix<double, 15, 1> &mu) ;
 
   /**
    * @brief Discrete imu mean propagation.
