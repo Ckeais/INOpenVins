@@ -20,6 +20,7 @@
  */
 
 #include "Propagator.h"
+#include <unsupported/Eigen/MatrixFunctions>
 
 
 
@@ -83,9 +84,9 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
     for (size_t i = 0; i < prop_data.size() - 1; i++) {
 
       // Get the next state Jacobian and noise Jacobian for this IMU reading
-      Eigen::Matrix<double, 16, 16> PHI = Eigen::Matrix<double, 16, 16>::Zero();
+      Eigen::Matrix<double, 15, 15> PHI = Eigen::Matrix<double, 15, 15>::Zero();
       Eigen::Matrix<double, 15, 15> F = Eigen::Matrix<double, 15, 15>::Zero();
-      Eigen::Matrix<double, 16, 16> Qdi = Eigen::Matrix<double, 16, 16>::Zero();
+      Eigen::Matrix<double, 15, 15> Qdi = Eigen::Matrix<double, 15, 15>::Zero();
       Eigen::Matrix<double, 15, 1> mu = Eigen::Matrix<double, 15, 1>::Zero();
       predict_and_compute(state, prop_data.at(i), prop_data.at(i + 1), F, PHI, Qdi, mu);
 
@@ -132,7 +133,7 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       }
 
 
-      Eigen::Matrix<double, 16, 1> transformed_points [31];
+      Eigen::Matrix<double, 15, 1> transformed_points [31];
 
       for (int i = 0; i < 31; i++) {
         Eigen::Matrix<double, 7, 7> mu_hat = Eigen::Matrix<double, 7, 7>::Zero();
@@ -143,9 +144,9 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
         mu_hat(2, 0) = -sigma_points[i](1);
         mu_hat(2, 1) = sigma_points[i](0);
         mu_hat.block(3, 0, 3, 1) = sigma_points[i].segment(3, 3);
-        mu_hat.block(6, 0, 3, 1) = sigma_points[i].segment(6, 3);
-        mu_hat.block(9, 0, 3, 1) = sigma_points[i].segment(9, 3);
-        mu_hat.block(12, 0, 3, 1) = sigma_points[i].segment(12, 3);
+        mu_hat.block(4, 0, 3, 1) = sigma_points[i].segment(6, 3);
+        mu_hat.block(5, 0, 3, 1) = sigma_points[i].segment(9, 3);
+        mu_hat.block(6, 0, 3, 1) = sigma_points[i].segment(12, 3);
         Eigen::Matrix<double, 7, 7> SE3_point = mu_hat.exp();
         transformed_points[i].segment(0, 4) = rot_2_quat(SE3_point.block(0, 0, 3, 3));
         transformed_points[i].segment(4, 3) << SE3_point(0, 1), SE3_point(1, 1), SE3_point(2, 1);
@@ -155,14 +156,14 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
 
       }
 
-      Eigen::Matrix<double, 16, 1> mu_prime = Eigen::Matrix<double, 16, 1>::Zero();
-      Eigen::Matrix<double, 16, 16> Qd_summed_prime = Eigen::Matrix<double, 16, 16>::Zero();
+      Eigen::Matrix<double, 15, 1> mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
+      Eigen::Matrix<double, 15, 15> Qd_summed_prime = Eigen::Matrix<double, 15, 15>::Zero();
 
-      for (int i = 0; i < 33; i++) {
+      for (int i = 0; i < 31; i++) {
         mu_prime = mu_prime + weights[i]*transformed_points[i];
       }
 
-      for (int i = 0; i < 33; i++) {
+      for (int i = 0; i < 31; i++) {
         Qd_summed_prime = Qd_summed_prime + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
       }
 
@@ -408,7 +409,7 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
 }
 
 void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core::ImuData &data_minus, const ov_core::ImuData &data_plus,
-                                     Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 16, 16> &PHI, Eigen::Matrix<double, 16, 16> &Qd, 
+                                     Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 15, 15> &PHI, Eigen::Matrix<double, 15, 15> &Qd, 
                                      Eigen::Matrix<double, 15, 1> &new_mu) {
 
   // Set them to zero
@@ -589,43 +590,56 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // unscented transform from original state to SE4(3)
 
-  int n = 16;
+  int n = 15;
   int k = 2;
 
   Eigen::LLT<MatrixXd> lltOfQd(Qd);
   Eigen::MatrixXd L = lltOfQd.matrixL();
   Eigen::MatrixXd L_prime = sqrt(n + k)*L;
 
-  Eigen::Matrix<double, 16, 1> sigma_points [33];
-  double weights [33];
+  Eigen::Matrix<double, 15, 1> sigma_points [31];
+  double weights [31];
 
   // VectorXd vec_joined(state->_imu->q().size() + state->_imu->q().size());
   // vec_joined << vec1, vec2;
+  Eigen::Matrix<double, 4, 1> q = state->_imu->quat();
+  Eigen::Matrix<double, 3, 3> qToSO3 = quat_2_Rot(q);
+  Eigen::Matrix<double, 3, 3> SO3Toso3 = qToSO3.log();
+  Eigen::Matrix<double, 3, 1> w = Eigen::Matrix<double, 3, 1>::Zero();
+  w(0) = SO3Toso3(2, 1);
+  w(1) = SO3Toso3(0, 2);
+  w(2) = SO3Toso3(1, 0);
 
-  Eigen::Matrix<double, 16, 1> mu;
-  mu << state->_imu->q(), state->_imu->p(), state->_imu->v(), state->_imu->bg(), state->_imu->ba();
+
+  Eigen::Matrix<double, 3, 1> p = state->_imu->pos();
+  Eigen::Matrix<double, 3, 1> v = state->_imu->vel();
+  Eigen::Matrix<double, 3, 1> bg = state->_imu->bias_g();
+  Eigen::Matrix<double, 3, 1> ba = state->_imu->bias_a();
+
+  Eigen::Matrix<double, 15, 1> mu;
+  mu << w, p, v, bg, ba;
   // should these be new or not? ^^
   sigma_points[0] = mu;
   weights[0] = k/(n + k);
 
   int i = 1;
-  while (i < 17) {
+  while (i < 16) {
     sigma_points[i] = mu + L_prime.col(i-1);
     weights[i] = 1/(2*(n + k));
     i++;
   }
 
-  i = 17;
-  while (i < 33) {
-    sigma_points[i] = mu + L_prime.col(i-17);
+  i = 16;
+  while (i < 31) {
+    sigma_points[i] = mu + L_prime.col(i-16);
     weights[i] = 1/(2*(n + k));
     i++;
   }
 
   
-  Eigen::Matrix<double, 15, 1> transformed_points [33];
+  Eigen::Matrix<double, 15, 1> transformed_points [31];
 
-  for (int i = 0; i < 33; i++) {
+  for (int i = 0; i < 31; i++) {
     Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
     SE3_point.block(0, 0, 3, 3) = quat_2_Rot(sigma_points[i].segment(0, 4));
     SE3_point.row(1) << sigma_points[i].segment(4, 3), 1, 0, 0, 0;
@@ -647,11 +661,11 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   Eigen::Matrix<double, 15, 1> mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
   Eigen::Matrix<double, 15, 15> Qd_prime = Eigen::Matrix<double, 15, 15>::Zero();
 
-  for (int i = 0; i < 33; i++) {
+  for (int i = 0; i < 31; i++) {
     mu_prime = mu_prime + weights[i]*transformed_points[i];
   }
 
-  for (int i = 0; i < 33; i++) {
+  for (int i = 0; i < 31; i++) {
     Qd_prime = Qd_prime + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
   }
 
@@ -660,7 +674,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   //inEKF state transition calculation
   Eigen::Matrix<double, 3, 3> w_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
-  Eigen::Matrix<double, 7, 7> se3 = Eigen::Matrix<double, 7, 7>::Zero();
+  Eigen::Matrix<double, 7, 7> se3_mu_prime = Eigen::Matrix<double, 7, 7>::Zero();
   w_hat_mat(0, 1) = -mu_prime(2);
   w_hat_mat(0, 2) = mu_prime(1);
   w_hat_mat(1, 0) = mu_prime(2);
@@ -673,10 +687,9 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   se3_mu_prime.row(3) << mu_prime.segment(9, 3), 0, 0, 0, 0;
   se3_mu_prime.row(4) << mu_prime.segment(12, 3), 0, 0, 0, 0;
 
-  Eigen::Matrix<double, 7, 7> SE3_mu_prime = se3_mu_prime.exp();
+  //  Eigen::Matrix<double, 7, 7> SE3_mu_prime = se3_mu_prime.exp();
 
-  Eigen::MatrixXd A = Eigen::Matrix<double, 16, 16>::Zero();
-  Eigen::MatrixXd PHI = Eigen::Matrix<double, 16, 16>::Zero();;
+  Eigen::MatrixXd A = Eigen::Matrix<double, 15, 15>::Zero();
   w_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
   Eigen::Matrix<double, 3, 3> a_hat_mat = Eigen::Matrix<double, 3, 3>::Zero();
 
@@ -709,15 +722,18 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   A.block(6, 6, 3, 3) = -w_hat_mat;
   A.block(6, 3, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
 
-  Eigen::Matrix<double, 16, 16> eye16 = Eigen::Matrix<double, 16, 16>::Identity();
+  PHI = (A*dt).exp();
 
-  PHI = A*dt + eye16;
+  // new_mu = PHI*SE3_mu_prime; // + wk?
 
-  new_mu = PHI*SE3_mu_prime; // + wk?
+  if (state->_options.use_rk4_integration)
+    predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+  else
+    predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
 
-  new_q = rot_2_quat(new_mu.block(0, 0, 3, 3));
-  new_p = new_mu.block(0, 3, 3, 1);
-  new_v = new_mu.block(0, 6, 3, 1);
+  // new_q = rot_2_quat(new_mu.block(0, 0, 3, 3));
+  // new_p = new_mu.block(0, 3, 3, 1);
+  // new_v = new_mu.block(0, 6, 3, 1);
 
   new_mu = mu_prime;
   Qd = Qd_prime;
