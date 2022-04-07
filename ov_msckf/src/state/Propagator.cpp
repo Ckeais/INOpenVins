@@ -101,6 +101,8 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       Qd_summed = 0.5 * (Qd_summed + Qd_summed.transpose());
       dt_summed += prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp;
 
+      // std::cout << "calculated Qd_summed\n";
+
 
 
 
@@ -116,24 +118,25 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
       double weights [31];
 
       sigma_points[0] = mu;
-      weights[0] = k/(n + k);
+      weights[0] = (1.0*k)/(n + k);
 
       int j = 1;
       while (j < 16) {
         sigma_points[j] = mu + L_prime.col(j-1);
-        weights[j] = 1/(2*(n + k));
+        weights[j] = 1.0/(2*(n + k));
         j++;
       }
 
       j = 16;
       while (j < 31) {
         sigma_points[j] = mu + L_prime.col(j-16);
-        weights[j] = 1/(2*(n + k));
+        weights[j] = 1.0/(2*(n + k));
         j++;
       }
 
 
       Eigen::Matrix<double, 15, 1> transformed_points [31];
+      // std::cout << "test1\n";
 
       for (int i = 0; i < 31; i++) {
         Eigen::Matrix<double, 7, 7> mu_hat = Eigen::Matrix<double, 7, 7>::Zero();
@@ -143,16 +146,35 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
         mu_hat(1, 2) = -sigma_points[i](0);
         mu_hat(2, 0) = -sigma_points[i](1);
         mu_hat(2, 1) = sigma_points[i](0);
-        mu_hat.block(3, 0, 3, 1) = sigma_points[i].segment(3, 3);
-        mu_hat.block(4, 0, 3, 1) = sigma_points[i].segment(6, 3);
-        mu_hat.block(5, 0, 3, 1) = sigma_points[i].segment(9, 3);
-        mu_hat.block(6, 0, 3, 1) = sigma_points[i].segment(12, 3);
-        Eigen::Matrix<double, 7, 7> SE3_point = mu_hat.exp();
-        transformed_points[i].segment(0, 4) = rot_2_quat(SE3_point.block(0, 0, 3, 3));
-        transformed_points[i].segment(4, 3) << SE3_point(0, 1), SE3_point(1, 1), SE3_point(2, 1);
-        transformed_points[i].segment(7, 3) << SE3_point(0, 2), SE3_point(1, 2), SE3_point(2, 2);
-        transformed_points[i].segment(10, 3) << SE3_point(0, 3), SE3_point(1, 3), SE3_point(2, 3);
-        transformed_points[i].segment(13, 3) << SE3_point(0, 4), SE3_point(1, 4), SE3_point(2, 4);
+        // std::cout << "test2\n";
+        mu_hat.block(0, 3, 3, 1) = sigma_points[i].block(3, 0, 3, 1);
+        mu_hat.block(0, 4, 3, 1) = sigma_points[i].block(6, 0, 3, 1);
+        mu_hat.block(0, 5, 3, 1) = sigma_points[i].block(9, 0, 3, 1);
+        mu_hat.block(0, 6, 3, 1) = sigma_points[i].block(12, 0, 3, 1);
+        // std::cout << "test3\n";
+        Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
+        SE3_point.block(0, 0, 3, 3) = (mu_hat.block(0, 0, 3, 3)).exp();
+        double theta = (sigma_points[i].segment(0, 3)).norm();
+        Eigen::Matrix<double, 3, 3> J = Eigen::Matrix<double, 3, 3>::Identity() + ((1 - cos(theta))/(theta*theta))*mu_hat.block(0, 0, 3, 3) + ((theta - sin(theta))/(theta*theta*theta))*(mu_hat.block(0, 0, 3, 3)*mu_hat.block(0, 0, 3, 3));
+        SE3_point.block(0, 3, 3, 1) = J*sigma_points[i].block(3, 0, 3, 1);
+        SE3_point.block(0, 4, 3, 1) = J*sigma_points[i].block(6, 0, 3, 1);
+        SE3_point.block(0, 5, 3, 1) = J*sigma_points[i].block(9, 0, 3, 1);
+        SE3_point.block(0, 6, 3, 1) = J*sigma_points[i].block(12, 0, 3, 1);
+        SE3_point(3, 3) = 1;
+        SE3_point(4, 4) = 1;
+        SE3_point(5, 5) = 1;
+        SE3_point(6, 6) = 1;
+
+        Eigen::Matrix<double, 3, 1> w_temp = Eigen::Matrix<double, 3, 1>::Zero();
+        w_temp(0) = sigma_points[i](0);
+        w_temp(1) = sigma_points[i](1);
+        w_temp(2) = sigma_points[i](2);
+        transformed_points[i].block(0, 0, 3, 1) = w_temp;
+        transformed_points[i].block(3, 0, 3, 1) = SE3_point.block(0, 3, 3, 1);
+        transformed_points[i].block(6, 0, 3, 1) = SE3_point.block(0, 4, 3, 1);
+        transformed_points[i].block(9, 0, 3, 1) = SE3_point.block(0, 5, 3, 1);
+        transformed_points[i].block(12, 0, 3, 1) = SE3_point.block(0, 6, 3, 1);
+        // std::cout << "test4\n";
 
       }
 
@@ -412,6 +434,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
                                      Eigen::Matrix<double, 15, 15> &F, Eigen::Matrix<double, 15, 15> &PHI, Eigen::Matrix<double, 15, 15> &Qd, 
                                      Eigen::Matrix<double, 15, 1> &new_mu) {
 
+  // std::cout << "running predict_and_computer\n";
   // Set them to zero
   F.setZero();
   Qd.setZero();
@@ -588,7 +611,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // quat2EulJ.block(3, 3, 3, 4) = quat2EulubJ;
 
-  // unscented transform from original state to SE4(3)
+  // unscented transform from original state to se4(3)
 
   int n = 15;
   int k = 2;
@@ -618,42 +641,92 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   Eigen::Matrix<double, 15, 1> mu;
   mu << w, p, v, bg, ba;
+  // std::cout << mu;
+  // std::cout << "mu^^^\n";
   // should these be new or not? ^^
   sigma_points[0] = mu;
-  weights[0] = k/(n + k);
+  weights[0] = (1.0*k)/(n + k);
 
   int i = 1;
   while (i < 16) {
     sigma_points[i] = mu + L_prime.col(i-1);
-    weights[i] = 1/(2*(n + k));
+    weights[i] = 1.0/(2*(n + k));
     i++;
   }
 
   i = 16;
   while (i < 31) {
     sigma_points[i] = mu + L_prime.col(i-16);
-    weights[i] = 1/(2*(n + k));
+    weights[i] = 1.0/(2*(n + k));
     i++;
   }
+
+  // i = 0;
+  // while (i < 31) {
+  //   std::cout << weights[i];
+  //   std::cout << "dkjfalkjdasfjndsa;l\n";
+  //   i++;
+  // }
 
   
   Eigen::Matrix<double, 15, 1> transformed_points [31];
 
   for (int i = 0; i < 31; i++) {
-    Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
-    SE3_point.block(0, 0, 3, 3) = quat_2_Rot(sigma_points[i].segment(0, 4));
-    SE3_point.row(1) << sigma_points[i].segment(4, 3), 1, 0, 0, 0;
-    SE3_point.row(2) << sigma_points[i].segment(7, 3), 0, 1, 0, 0;
-    SE3_point.row(3) << sigma_points[i].segment(10, 3), 0, 0, 1, 0;
-    SE3_point.row(4) << sigma_points[i].segment(13, 3), 0, 0, 0, 1;
-    Eigen::Matrix<double, 7, 7> se3_point = SE3_point.log();
-    transformed_points[i](0) = se3_point(2, 1);
-    transformed_points[i](1) = se3_point(0, 2);
-    transformed_points[i](2) = se3_point(1, 0);
-    transformed_points[i].segment(3, 3) = se3_point.col(3).segment(0, 3);
-    transformed_points[i].segment(6, 3) = se3_point.col(4).segment(0, 3);
-    transformed_points[i].segment(9, 3) = se3_point.col(5).segment(0, 3);
-    transformed_points[i].segment(12, 3) = se3_point.col(6).segment(0, 3);
+    transformed_points[i] = Eigen::Matrix<double, 15, 1>::Zero();
+    // Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
+    // std::cout << quat_2_Rot(sigma_points[i].block(0, 0, 4, 1));
+    // std::cout << "quat2rot^^\n";
+    // std::cout << SE3_point.block(0, 0, 3, 3);
+    // std::cout << "block test ^^\n";
+    Eigen::Matrix<double, 3, 3> w_mat = Eigen::Matrix<double, 3, 3>::Zero();
+    w_mat(0, 1) = -sigma_points[i](2);
+    w_mat(0, 2) = sigma_points[i](1);
+    w_mat(1, 0) = sigma_points[i](2);
+    w_mat(1, 2) = -sigma_points[i](0);
+    w_mat(2, 0) = -sigma_points[i](1);
+    w_mat(2, 1) = sigma_points[i](0);
+    // SE3_point.block(0, 0, 3, 3) = w_mat.exp();
+    // std::cout << "line test\n";
+
+
+    // SE3_point.col(3) << sigma_points[i].block(3, 0, 3, 1), 1, 0, 0, 0;
+    // // std::cout << "line test2\n";
+    // SE3_point.col(4) << sigma_points[i].block(6, 0, 3, 1), 0, 1, 0, 0;
+    // SE3_point.col(5) << sigma_points[i].block(9, 0, 3, 1), 0, 0, 1, 0;
+    // SE3_point.col(6) << sigma_points[i].block(12, 0, 3, 1), 0, 0, 0, 1;
+    // std::cout << SE3_point;
+    // std::cout << "SE3_point^^\n";
+    Eigen::Matrix<double, 7, 7> se3_point = Eigen::Matrix<double, 7, 7>::Zero();
+    se3_point.block(0, 0, 3, 3) = w_mat;
+    // std::cout << w_mat;
+    // std::cout << "logged^^\n";
+    // std::string s;
+    // std::cin >> s;
+    Eigen::Matrix<double, 3, 1> w;
+    w(0) = se3_point(2, 1);;
+    w(1) = se3_point(0, 2);
+    w(2) = se3_point(1, 0);
+
+
+
+    double theta = w.norm();
+    Eigen::Matrix<double, 3, 3> J = Eigen::Matrix<double, 3, 3>::Identity() + ((1 - cos(theta))/(theta*theta))*se3_point.block(0, 0, 3, 3) + ((theta - sin(theta))/(theta*theta*theta))*(se3_point.block(0, 0, 3, 3)*se3_point.block(0, 0, 3, 3));
+    se3_point.block(0, 3, 3, 1) = (J.inverse())*sigma_points[i].block(3, 0, 3, 1);
+    se3_point.block(0, 4, 3, 1) = (J.inverse())*sigma_points[i].block(6, 0, 3, 1);
+    se3_point.block(0, 5, 3, 1) = (J.inverse())*sigma_points[i].block(9, 0, 3, 1);
+    se3_point.block(0, 6, 3, 1) = (J.inverse())*sigma_points[i].block(12, 0, 3, 1);
+
+    transformed_points[i](0) = w(0);
+    transformed_points[i](1) = w(1);
+    transformed_points[i](2) = w(2);
+    transformed_points[i].block(3, 0, 3, 1) = se3_point.col(3).block(0, 0, 3, 1);
+    transformed_points[i].block(6, 0, 3, 1) = se3_point.col(4).block(0, 0, 3, 1);
+    transformed_points[i].block(9, 0, 3, 1) = se3_point.col(5).block(0, 0, 3, 1);
+    transformed_points[i].block(12, 0, 3, 1) = se3_point.col(6).block(0, 0, 3, 1);
+    // std::cout << se3_point;
+    // std::cout << "se3_point^^\n";
+    // std::cout << transformed_points[i];
+    // std::cout << "twist^^\n";
 
 
   }
@@ -661,7 +734,17 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   Eigen::Matrix<double, 15, 1> mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
   Eigen::Matrix<double, 15, 15> Qd_prime = Eigen::Matrix<double, 15, 15>::Zero();
 
+
+
   for (int i = 0; i < 31; i++) {
+    // std::cout << i;
+    // std::cout << "i^^\n";
+    // std::cout << weights[i];
+    // std::cout << "weight^^\n";
+    // std::cout << transformed_points[i];
+    // std::cout << "transformed_points[i]^^\n";
+    // std::cout << mu_prime;
+    // std::cout << "mu_prime in loop^^\n";
     mu_prime = mu_prime + weights[i]*transformed_points[i];
   }
 
@@ -669,6 +752,10 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
     Qd_prime = Qd_prime + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
   }
 
+    // std::cout << mu_prime;
+    // std::cout << "mu_prime^^\n";
+    // std::cout << Qd_prime;
+    // std::cout << "Qd_prime^^\n";
 
 
 
@@ -682,10 +769,10 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   w_hat_mat(2, 0) = -mu_prime(1);
   w_hat_mat(2, 1) = mu_prime(0);
   se3_mu_prime.block(0, 0, 3, 3) = w_hat_mat;
-  se3_mu_prime.row(1) << mu_prime.segment(3, 3), 0, 0, 0, 0;
-  se3_mu_prime.row(2) << mu_prime.segment(6, 3), 0, 0, 0, 0;
-  se3_mu_prime.row(3) << mu_prime.segment(9, 3), 0, 0, 0, 0;
-  se3_mu_prime.row(4) << mu_prime.segment(12, 3), 0, 0, 0, 0;
+  se3_mu_prime.col(1) << mu_prime.block(3, 0, 3, 1), 0, 0, 0, 0;
+  se3_mu_prime.col(2) << mu_prime.block(6, 0, 3, 1), 0, 0, 0, 0;
+  se3_mu_prime.col(3) << mu_prime.block(9, 0, 3, 1), 0, 0, 0, 0;
+  se3_mu_prime.col(4) << mu_prime.block(12, 0, 3, 1), 0, 0, 0, 0;
 
   //  Eigen::Matrix<double, 7, 7> SE3_mu_prime = se3_mu_prime.exp();
 
@@ -760,7 +847,7 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   // int ba_id = state->_imu->ba()->id() - state->_imu->id();
 
 
-  std::cout << "GO TEAM 12!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; 
+  // std::cout << "GO TEAM 12!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; 
 
   // Now replace imu estimate and fej with propagated values
   Eigen::Matrix<double, 16, 1> imu_x = state->_imu->value();
