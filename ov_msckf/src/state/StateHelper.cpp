@@ -20,10 +20,12 @@
  */
 
 #include "StateHelper.h"
+#include <unsupported/Eigen/MatrixFunctions>
 
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
+using namespace Eigen;
 
 void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector<std::shared_ptr<Type>> &order_NEW,
                                  const std::vector<std::shared_ptr<Type>> &order_OLD, const Eigen::MatrixXd &Phi,
@@ -67,14 +69,122 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
     current_it += var->size();
   }
 
+  Eigen::Matrix<double, 3, 3> eye3 = Eigen::Matrix<double, 3, 3>::Identity();
+
+  std::cout << state->_imu;
+  std::cout << "^^^^^^^^^^^^^^^^^^^^^^^";
+
+
+
   // Loop through all our old states and get the state transition times it
   // Cov_PhiT = [ Pxx ] [ Phi' ]'
+  Eigen::Matrix<double, 15, 1> mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
   Eigen::MatrixXd Cov_PhiT = Eigen::MatrixXd::Zero(state->_Cov.rows(), Phi.rows());
   for (size_t i = 0; i < order_OLD.size(); i++) {
     std::shared_ptr<Type> var = order_OLD.at(i);
+
+  
+    // unscented transform from original state to se4(3)
+    int n = 15;
+    int k = 2;
+
+    // Cholesky decomposition
+    Eigen::LLT<MatrixXd> lltOfQd(state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size()));
+    Eigen::MatrixXd L = lltOfQd.matrixL();
+
+    Eigen::MatrixXd L_prime = sqrt(n + k)*L;
+
+    Eigen::Matrix<double, 15, 1> sigma_points [31];
+    double weights [31];
+
+    // change quat representation to omega representation
+    Eigen::Matrix<double, 4, 1> q = state->_imu->quat();
+    Eigen::Matrix<double, 3, 3> SO3 = quat_2_Rot(q);
+    Eigen::Matrix<double, 3, 3> so3 = SO3.log();
+    Eigen::Matrix<double, 3, 1> w = Eigen::Matrix<double, 3, 1>::Zero();
+    w(0) = so3(2, 1);
+    w(1) = so3(0, 2);
+    w(2) = so3(1, 0);
+
+
+    // make mu vector and set its weight
+    Eigen::Matrix<double, 15, 1> mu;
+    mu << w, state->_imu->pos(), state->_imu->vel(), state->_imu->bias_g(), state->_imu->bias_a();
+    sigma_points[0] = mu;
+    weights[0] = (1.0*k)/(n + k);
+
+    // create sigma points and set their weights
+    i = 1;
+    while (i < 16) {
+      sigma_points[i] = mu + L_prime.col(i-1);
+      weights[i] = 1.0/(2*(n + k));
+      i++;
+    }
+
+    i = 16;
+    while (i < 31) {
+      sigma_points[i] = mu - L_prime.col(i-16);
+      weights[i] = 1.0/(2*(n + k));
+      i++;
+    }
+    
+    Eigen::Matrix<double, 15, 1> twist_points [31];
+
+    // convert [w, p, v. bg, ba] to twist
+    for (int i = 0; i < 31; i++) {
+      twist_points[i] = Eigen::Matrix<double, 15, 1>::Zero();
+
+      // create so(3) matrix from w vector
+      Eigen::Matrix<double, 3, 3> w_mat = Eigen::Matrix<double, 3, 3>::Zero();
+      w_mat(0, 1) = -sigma_points[i](2);
+      w_mat(0, 2) = sigma_points[i](1);
+      w_mat(1, 0) = sigma_points[i](2);
+      w_mat(1, 2) = -sigma_points[i](0);
+      w_mat(2, 0) = -sigma_points[i](1);
+      w_mat(2, 1) = sigma_points[i](0);
+
+      // get w vector from w_mat
+      Eigen::Matrix<double, 3, 1> w;
+      w(0) = w_mat(2, 1);;
+      w(1) = w_mat(0, 2);
+      w(2) = w_mat(1, 0);
+
+      // calculate jacobian inverse
+      double theta = w.norm();
+      Eigen::Matrix<double, 3, 3> J = eye3 + 
+                                      ((1 - cos(theta))/(theta*theta))*w_mat + 
+                                      ((theta - sin(theta))/(theta*theta*theta))*(w_mat*w_mat);
+      Eigen::Matrix<double, 3, 3> J_inv = J.inverse();
+
+      // put values into the twist
+      twist_points[i](0) = sigma_points[i](0);
+      twist_points[i](1) = sigma_points[i](1);
+      twist_points[i](2) = sigma_points[i](2);
+      twist_points[i].block(3, 0, 3, 1) = J_inv*w_mat*sigma_points[i].block(3, 0, 3, 1);
+      twist_points[i].block(6, 0, 3, 1) = J_inv*w_mat*sigma_points[i].block(6, 0, 3, 1);
+      twist_points[i].block(9, 0, 3, 1) = J_inv*w_mat*sigma_points[i].block(9, 0, 3, 1);
+      twist_points[i].block(12, 0, 3, 1) = J_inv*w_mat*sigma_points[i].block(12, 0, 3, 1);
+
+    }
+
+
+    // calculate mu_prime and Qd_prime from weights and transformed twist points
+
+    Eigen::Matrix<double, 15, 15> LIE_COV = Eigen::Matrix<double, 15, 15>::Zero();
+
+    for (int i = 0; i < 31; i++) {
+      mu_prime = mu_prime + weights[i]*twist_points[i];
+    }
+
+    for (int i = 0; i < 31; i++) {
+      LIE_COV = LIE_COV + weights[i]*((twist_points[i] - mu_prime)*(twist_points[i] - mu_prime).transpose());
+    }
+
     Cov_PhiT.noalias() +=
-        state->_Cov.block(0, var->id(), state->_Cov.rows(), var->size()) * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose();
+        LIE_COV * Phi.block(0, Phi_id[i], Phi.rows(), var->size()).transpose();
   }
+
+  
 
   // Get Phi_NEW*Covariance*Phi_NEW^t + Q
   Eigen::MatrixXd Phi_Cov_PhiT = Q.selfadjointView<Eigen::Upper>();
@@ -82,6 +192,106 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
     std::shared_ptr<Type> var = order_OLD.at(i);
     Phi_Cov_PhiT.noalias() += Phi.block(0, Phi_id[i], Phi.rows(), var->size()) * Cov_PhiT.block(var->id(), 0, var->size(), Phi.rows());
   }
+
+
+  // unscented transform from se4(3) to original state
+  int n = 15;
+  int k = 2;
+
+  // Cholesky decomposition
+  Eigen::LLT<MatrixXd> lltOfQd_summed(Phi_Cov_PhiT);
+  Eigen::MatrixXd L = lltOfQd_summed.matrixL();
+  Eigen::MatrixXd L_prime = sqrt(n + k)*L;
+
+  Eigen::Matrix<double, 15, 1> sigma_points [31];
+  double weights [31];
+
+  // get mu and calculate its weight
+  sigma_points[0] = mu_prime;
+  weights[0] = (1.0*k)/(n + k);
+
+  // create sigma points and set their weights
+  int j = 1;
+  while (j < 16) {
+    sigma_points[j] = mu_prime + L_prime.col(j-1);
+    weights[j] = 1.0/(2*(n + k));
+    j++;
+  }
+
+  j = 16;
+  while (j < 31) {
+    sigma_points[j] = mu_prime - L_prime.col(j-16);
+    weights[j] = 1.0/(2*(n + k));
+    j++;
+  }
+
+  // transform sigma points in twist form to [w, p, v, bg, ba]
+  Eigen::Matrix<double, 15, 1> transformed_points [31];
+
+  for (int i = 0; i < 31; i++) {
+
+    // calculate w from twist
+    Eigen::Matrix<double, 3, 1> w = Eigen::Matrix<double, 3, 1>::Zero();
+    w(0) = sigma_points[i](0);
+    w(1) = sigma_points[i](1);
+    w(2) = sigma_points[i](2);
+
+    // calculate w_hat from w
+    Eigen::Matrix<double, 3, 3> w_hat = Eigen::Matrix<double, 3, 3>::Zero();
+    w_hat(0, 1) = -w(2);
+    w_hat(0, 2) = w(1);
+    w_hat(1, 0) = w(2);
+    w_hat(1, 2) = -w(0);
+    w_hat(2, 0) = -w(1);
+    w_hat(2, 1) = w(0);
+
+    // calculate twist matrix representation
+    Eigen::Matrix<double, 7, 7> se3 = Eigen::Matrix<double, 7, 7>::Zero();
+    se3.block(0, 0, 3, 3) = w_hat;
+    se3.block(0, 3, 3, 1) = sigma_points[i].block(3, 0, 3, 1);
+    se3.block(0, 4, 3, 1) = sigma_points[i].block(6, 0, 3, 1);
+    se3.block(0, 5, 3, 1) = sigma_points[i].block(9, 0, 3, 1);
+    se3.block(0, 6, 3, 1) = sigma_points[i].block(12, 0, 3, 1);
+
+    // calculate SE3 representation from se3
+    Eigen::Matrix<double, 7, 7> SE3_point = Eigen::Matrix<double, 7, 7>::Zero();
+    SE3_point.block(0, 0, 3, 3) = (w_hat).exp();
+    double theta = w.norm();
+    Eigen::Matrix<double, 3, 3> J = Eigen::Matrix<double, 3, 3>::Identity() + 
+                                    ((1 - cos(theta))/(theta*theta))*w_hat + 
+                                    ((theta - sin(theta))/(theta*theta*theta))*(w_hat*w_hat);
+
+    SE3_point.block(0, 3, 3, 1) = J*sigma_points[i].block(3, 0, 3, 1);
+    SE3_point.block(0, 4, 3, 1) = J*sigma_points[i].block(6, 0, 3, 1);
+    SE3_point.block(0, 5, 3, 1) = J*sigma_points[i].block(9, 0, 3, 1);
+    SE3_point.block(0, 6, 3, 1) = J*sigma_points[i].block(12, 0, 3, 1);
+    SE3_point(3, 3) = 1;
+    SE3_point(4, 4) = 1;
+    SE3_point(5, 5) = 1;
+    SE3_point(6, 6) = 1;
+
+
+    // calculate [w, p, v, bg, ba] from SE3 representation
+    transformed_points[i].block(0, 0, 3, 1) = w;
+    transformed_points[i].block(3, 0, 3, 1) = SE3_point.block(0, 3, 3, 1);
+    transformed_points[i].block(6, 0, 3, 1) = SE3_point.block(0, 4, 3, 1);
+    transformed_points[i].block(9, 0, 3, 1) = SE3_point.block(0, 5, 3, 1);
+    transformed_points[i].block(12, 0, 3, 1) = SE3_point.block(0, 6, 3, 1);
+  }
+
+  // calculate mu_prime and Phi_Cov_PhiT_prime from weights and transformed points
+  mu_prime = Eigen::Matrix<double, 15, 1>::Zero();
+  Phi_Cov_PhiT = Eigen::Matrix<double, 15, 15>::Zero();
+
+  for (int i = 0; i < 31; i++) {
+    mu_prime = mu_prime + weights[i]*transformed_points[i];
+  }
+
+  for (int i = 0; i < 31; i++) {
+    Phi_Cov_PhiT = Phi_Cov_PhiT + weights[i]*((transformed_points[i] - mu_prime)*(transformed_points[i] - mu_prime).transpose());
+  }
+
+
 
   // We are good to go!
   int start_id = order_NEW.at(0)->id();
