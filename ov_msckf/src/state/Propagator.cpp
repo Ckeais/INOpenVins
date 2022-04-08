@@ -453,10 +453,10 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
   // Compute the new state mean value
   Eigen::Vector4d new_q;
   Eigen::Vector3d new_v, new_p;
-  // if (state->_options.use_rk4_integration)
-  //   predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
-  // else
-  //   predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+  if (state->_options.use_rk4_integration)
+    predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
+  else
+    predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
 
   // Get the locations of each entry of the imu state
   int th_id = state->_imu->q()->id() - state->_imu->id();
@@ -813,10 +813,6 @@ void Propagator::predict_and_compute(std::shared_ptr<State> state, const ov_core
 
   // new_mu = PHI*SE3_mu_prime; // + wk?
 
-  if (state->_options.use_rk4_integration)
-    predict_mean_rk4(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
-  else
-    predict_mean_discrete(state, dt, w_hat, a_hat, w_hat2, a_hat2, new_q, new_v, new_p);
 
   // new_q = rot_2_quat(new_mu.block(0, 0, 3, 3));
   // new_p = new_mu.block(0, 3, 3, 1);
