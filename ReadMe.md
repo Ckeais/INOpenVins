@@ -41,6 +41,7 @@ catkin build -DDISABLE_MATPLOTLIB=OFF # build with viz (default)
 
 # openCV dependency
 ```txt
+# Try to first build with your system / ROS OpenCV. Only fall back onto this if it does not allow you to compile, or want a newer version!
 git clone https://github.com/opencv/opencv/
 git clone https://github.com/opencv/opencv_contrib/
 mkdir opencv/build/
