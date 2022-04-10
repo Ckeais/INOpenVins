@@ -11,8 +11,13 @@ Invariant OpenVINS is a modified version of OpenVINS for the teams project for R
 
 # Invariant OpenVINS Set Up:
 
+## ROS dependency
+```txt
+sudo apt-get install libeigen3-dev libboost-all-dev libceres-dev
+```
+
 ## Install ROS1
-```bash
+```txt
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
 sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
 sudo apt-get update
