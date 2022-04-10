@@ -11,6 +11,7 @@
 # Set Up:
 
 # install ROS1
+```txt
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
 sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
 sudo apt-get update
@@ -21,6 +22,7 @@ sudo apt-get install python3-catkin-tools python3-osrf-pycommon # ubuntu 20.04
 sudo apt-get install libeigen3-dev libboost-all-dev libceres-dev
 echo "source /opt/ros/$ROS1_DISTRO/setup.bash" >> ~/.bashrc
 source ~/.bashrc
+```
 
 # clone openvins
 mkdir -p ~/workspace/catkin_ws_ov/src/
