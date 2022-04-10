@@ -10,6 +10,11 @@
 
 # modified INOpenVins Set Up:
 
+## ROS dependency
+```txt
+sudo apt-get install libeigen3-dev libboost-all-dev libceres-dev
+```
+
 ## install ROS1
 ```txt
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
