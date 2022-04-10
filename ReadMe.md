@@ -65,7 +65,7 @@ sudo apt-get install libceres-dev
 
 * https://fpv.ifi.uzh.ch/
 
-# Running on the UZH+FPV Dataset:
+# Running on the UZH-FPV Dataset:
 
 ```txt
 roscore # term 0
