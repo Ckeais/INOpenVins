@@ -8,9 +8,9 @@
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - http://udel.edu/~pgeneva/downloads/papers/c10.pdf
 
-# Set Up:
+# OpenVins Set Up:
 
-# install ROS1
+## install ROS1
 ```txt
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
 sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
@@ -25,17 +25,22 @@ source ~/.bashrc
 ```
 
 # clone openvins
+```txt
 mkdir -p ~/workspace/catkin_ws_ov/src/
 cd ~/workspace/catkin_ws_ov/src/
 git clone https://github.com/rpng/open_vins/
 cd ..
 catkin build # ROS1
+```
 
 # additional evaluation requirement
+```txt
 sudo apt-get install python3-dev python3-matplotlib python3-numpy python3-psutil python3-tk # for python3 systems
 catkin build -DDISABLE_MATPLOTLIB=OFF # build with viz (default)
+```
 
 # openCV dependency
+```txt
 git clone https://github.com/opencv/opencv/
 git clone https://github.com/opencv/opencv_contrib/
 mkdir opencv/build/
@@ -43,8 +48,10 @@ cd opencv/build/
 cmake -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules ..
 make -j8
 sudo make install
+```
 
 # Ceres Solver dependency
+```txt
 sudo apt-get install -y cmake libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev
 CERES_VERSION="2.0.0"
 git clone https://ceres-solver.googlesource.com/ceres-solver
@@ -54,8 +61,9 @@ mkdir build && cd build
 cmake ..
 make
 sudo make install
+```
 
-The UZH-FPV Drone Racing Dataset:
+# The UZH-FPV Drone Racing Dataset:
 
 * https://fpv.ifi.uzh.ch/
 
