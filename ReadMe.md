@@ -60,6 +60,17 @@ sudo apt-get install libceres-dev
 
 * https://fpv.ifi.uzh.ch/
 
+```txt
+roscore # term 0
+source devel/setup.bash # term 1
+roslaunch ov_msckf subscribe.launch config:=uzhfpv_indoor
+```
+In another two terminals we can run the following. For RVIZ, one can open the ov_msckf/launch/display.rviz configuration file. You should see the system publishing features and a state estimate.
+
+```txt
+rviz # term 2
+rosbag play V1_01_easy.bag # term 3
+```
 
 
 ## Credit / Licensing
