@@ -1,4 +1,4 @@
-# Application of InEKF with OpenVINS on UZH-FPV Drone Racing Dataset
+# INOpenVIns
 
 Invariant OpenVINS is a modified version of OpenVINS for the teams project for ROB 530 Mobile Robotics W22. This was achieved via the modification of the propagation step in OpenVINS to operate in the Lie group of $\text{SE}(3)$. This provides slightly improved performance over OpenVINS.
 
@@ -54,24 +54,29 @@ make -j8
 sudo make install
 ```
 
+sudo apt-get install libceres-dev
 ## Installing Ceres Solver dependency
 
 ```bash
-sudo apt-get install -y cmake libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev
-CERES_VERSION="2.0.0"
-git clone https://ceres-solver.googlesource.com/ceres-solver
-cd ceres-solver
-git checkout tags/${CERES_VERSION}
-mkdir build && cd build
-cmake ..
-make
-sudo make install
 ```
 
 # The UZH-FPV Drone Racing Dataset:
 
 * https://fpv.ifi.uzh.ch/
 
+# Running on the UZH+FPV Dataset:
+
+```txt
+roscore # term 0
+source devel/setup.bash # term 1
+roslaunch ov_msckf subscribe.launch config:=uzhfpv_indoor
+```
+In another two terminals we can run the following. For RVIZ, one can open the ov_msckf/launch/display.rviz configuration file. You should see the system publishing features and a state estimate.
+
+```txt
+rviz # term 2
+rosbag play V1_01_easy.bag # term 3
+```
 
 
 ## Credit / Licensing
