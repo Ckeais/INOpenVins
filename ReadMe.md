@@ -93,6 +93,9 @@ rviz # term 2
 rosbag play V1_01_easy.bag # term 3
 ```
 
+# Data Evaluation
+The rosbag generated can be analyzed with scripts in `data evaluation`.
+
 
 ## Credit / Licensing
 
