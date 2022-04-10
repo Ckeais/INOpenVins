@@ -1,6 +1,6 @@
 # INOpenVINS
 
-Invariant OpenVINS is a modified version of OpenVINS for the teams project for ROB 530 Mobile Robotics W22. This was achieved via the modification of the propagation step in OpenVINS to operate in the Lie group of $\text{SE}(3)$. This provides slightly improved performance over OpenVINS.
+Invariant OpenVINS is a modified version of OpenVINS for the teams project for ROB 530 Mobile Robotics W22. This was achieved via the modification of the propagation step in OpenVINS to operate in the Lie group of SE(3). This provides slightly improved performance over OpenVINS.
 
 ## OpenVINS documentation:
 
