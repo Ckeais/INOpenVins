@@ -1,14 +1,14 @@
 # Application of InEKF with OpenVINS on UZH-FPV Drone Racing Dataset
 
 
-OpenVins documentation:
+# OpenVins documentation:
 
 * Github project page - https://github.com/rpng/open_vins
 * Documentation - https://docs.openvins.com/
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - http://udel.edu/~pgeneva/downloads/papers/c10.pdf
 
-From OpenCins documentation:
+# Set Up:
 
 # install ROS1
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
