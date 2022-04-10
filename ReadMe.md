@@ -1,4 +1,4 @@
-# Application of InEKF with OpenVINS on UZH-FPV Drone Racing Dataset
+# INOpenVIns
 
 
 # OpenVins documentation:
