@@ -1,17 +1,18 @@
 # Application of InEKF with OpenVINS on UZH-FPV Drone Racing Dataset
 
+Invariant OpenVINS is a modified version of OpenVINS for the teams project for ROB 530 Mobile Robotics W22. This was achieved via the modification of the propagation step in OpenVINS to operate in the Lie group of $\text{SE}(3)$. This provides slightly improved performance over OpenVINS.
 
-# OpenVins documentation:
+## OpenVINS documentation:
 
 * Github project page - https://github.com/rpng/open_vins
 * Documentation - https://docs.openvins.com/
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - http://udel.edu/~pgeneva/downloads/papers/c10.pdf
 
-# OpenVins Set Up:
+# Invariant OpenVINS Set Up:
 
-## install ROS1
-```txt
+## Install ROS1
+```bash
 sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
 sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
 sudo apt-get update
@@ -24,23 +25,26 @@ echo "source /opt/ros/$ROS1_DISTRO/setup.bash" >> ~/.bashrc
 source ~/.bashrc
 ```
 
-# clone openvins
-```txt
+## Cloning Invariant OpenVINS
+
+```bash
 mkdir -p ~/workspace/catkin_ws_ov/src/
 cd ~/workspace/catkin_ws_ov/src/
-git clone https://github.com/rpng/open_vins/
+git clone https://github.com/Ckeais/ROB530.git
 cd ..
 catkin build # ROS1
 ```
 
-# additional evaluation requirement
+## Additional requirements for evaluation
+
 ```txt
 sudo apt-get install python3-dev python3-matplotlib python3-numpy python3-psutil python3-tk # for python3 systems
 catkin build -DDISABLE_MATPLOTLIB=OFF # build with viz (default)
 ```
 
-# openCV dependency
-```txt
+## Installing openCV dependency
+
+```bash
 git clone https://github.com/opencv/opencv/
 git clone https://github.com/opencv/opencv_contrib/
 mkdir opencv/build/
@@ -50,8 +54,9 @@ make -j8
 sudo make install
 ```
 
-# Ceres Solver dependency
-```txt
+## Installing Ceres Solver dependency
+
+```bash
 sudo apt-get install -y cmake libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev
 CERES_VERSION="2.0.0"
 git clone https://ceres-solver.googlesource.com/ceres-solver
@@ -76,7 +81,7 @@ University of Delaware. If you have any issues with the code please open an issu
 implementation details and references. For researchers that have leveraged or compared to this work, please cite the
 following:
 
-```txt
+```bibtex
 @Conference{Geneva2020ICRA,
   Title      = {{OpenVINS}: A Research Platform for Visual-Inertial Estimation},
   Author     = {Patrick Geneva and Kevin Eckenhoff and Woosik Lee and Yulin Yang and Guoquan Huang},
@@ -88,5 +93,4 @@ following:
 ```
 
 The codebase is licensed under the [GNU General Public License v3 (GPL-3)](https://www.gnu.org/licenses/gpl-3.0.txt).
-
 
