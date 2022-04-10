@@ -8,7 +8,7 @@
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - http://udel.edu/~pgeneva/downloads/papers/c10.pdf
 
-# OpenVins Set Up:
+# modified INOpenVins Set Up:
 
 ## install ROS1
 ```txt
@@ -59,6 +59,8 @@ sudo apt-get install libceres-dev
 # The UZH-FPV Drone Racing Dataset:
 
 * https://fpv.ifi.uzh.ch/
+
+# Running on the UZH+FPV Dataset:
 
 ```txt
 roscore # term 0
