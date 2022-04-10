@@ -1,0 +1,12 @@
+Datasets:
+  IN_5:
+    label: In5
+Algorithms:
+  Modified:
+    fn: traj_est
+    label: Modified
+  OpenVINS:
+    fn: traj_est
+    label: OpenVINS
+RelDistances: []
+RelDistancePercentages: []
