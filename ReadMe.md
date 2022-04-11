@@ -35,7 +35,7 @@ source ~/.bashrc
 ```bash
 mkdir -p ~/workspace/catkin_ws_ov/src/
 cd ~/workspace/catkin_ws_ov/src/
-git clone https://github.com/Ckeais/ROB530.git
+git clone https://github.com/Ckeais/INOpenVins.git
 cd ..
 catkin build # ROS1
 ```
